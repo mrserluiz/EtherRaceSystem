@@ -1,0 +1,10 @@
+racas:
+  humano: {nome: "Humano", escala: 1.0, material: PLAYER_HEAD}
+  elfo: {nome: "Elfo", escala: 1.09375, material: OAK_SAPLING}
+  fada: {nome: "Fada", escala: 0.78125, material: ALLAY_SPAWN_EGG}
+  anao: {nome: "Anão", escala: 0.90625, material: IRON_PICKAXE}
+  draconato: {nome: "Draconato", escala: 1.0, material: DRAGON_BREATH}
+  tiefling: {nome: "Tiefling", escala: 1.0, material: NETHER_WART}
+transformacoes:
+  lobisomem: {nome: "Lobisomem", escala_multiplicador: 1.0, material: BONE, custom_model_data: 263001}
+  vampiro: {nome: "Vampiro", escala_multiplicador: 1.0, material: GHAST_TEAR, custom_model_data: 263002}
