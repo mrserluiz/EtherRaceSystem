@@ -1,0 +1,15 @@
+name: EtherRaceSystem
+version: '0.1.0'
+main: br.com.ethercraft.races.EtherRaceSystem
+api-version: '1.21'
+author: EtherCraft
+description: Raças e transformações sobrenaturais do EtherCraft.
+commands:
+  raca:
+    description: Gerencia raças e transformações.
+    usage: /raca
+    aliases: [race, races]
+permissions:
+  etherracesystem.admin:
+    description: Permite administrar raças e conceder relíquias.
+    default: op
