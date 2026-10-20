@@ -18,6 +18,7 @@ import java.util.*;
 public final class EtherRaceSystem extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String[] RACAS = {"humano","elfo","fada","anao","draconato","tiefling"};
     private static final String[] TRANSFORMACOES = {"lobisomem","vampiro"};
+    private final Map<UUID, String> testes = new HashMap<>();
     private NamespacedKey chave;
     private File arquivo;
     private YamlConfiguration dados;
@@ -30,7 +31,7 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
         Bukkit.getPluginManager().registerEvents(this, this);
         Objects.requireNonNull(getCommand("raca")).setExecutor(this);
         Objects.requireNonNull(getCommand("raca")).setTabCompleter(this);
-        for (Player p : Bukkit.getOnlinePlayers()) aplicar(p);
+        for (Player p : Bukkit.getOnlinePlayers()) prepararEntrada(p);
     }
     @Override public void onDisable() { salvar(); }
     private void salvar() { try { dados.save(arquivo); } catch (IOException e) { getLogger().severe("Falha ao salvar jogadores.yml: " + e.getMessage()); } }
@@ -42,16 +43,18 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
     private void aplicar(Player p) {
         var atributo = p.getAttribute(Attribute.SCALE);
         if (atributo == null) { getLogger().warning("Atributo SCALE indisponível para " + p.getName()); return; }
-        String r = raca(p), t = transformacao(p);
+        String r = testes.getOrDefault(p.getUniqueId(), raca(p)), t = transformacao(p);
         double escala = r.isEmpty() ? 1.0 : getConfig().getDouble("racas." + r + ".escala", 1.0);
         if (!t.isEmpty()) escala *= getConfig().getDouble("transformacoes." + t + ".escala_multiplicador", 1.0);
         atributo.setBaseValue(Math.max(0.0625, Math.min(16, escala)));
     }
     private void definir(Player p, String r) {
+        testes.remove(p.getUniqueId());
         dados.set(path(p,"raca"),r); salvar(); aplicar(p);
         p.sendMessage("§aSua raça agora é §e" + nomeRaca(r) + "§a.");
     }
     private void limpar(Player p) {
+        testes.remove(p.getUniqueId());
         dados.set(path(p,"raca"),null); dados.set(path(p,"transformacao"),null);
         salvar(); aplicar(p); p.sendMessage("§eSua raça e transformação foram removidas.");
     }
@@ -60,7 +63,7 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
         ItemStack item = new ItemStack(m == null ? Material.PAPER : m);
         ItemMeta meta = item.getItemMeta();
         meta.setDisplayName("§e" + nomeRaca(r));
-        meta.setLore(List.of("§7Clique para escolher esta raça"));
+        meta.setLore(List.of("§7Escala: " + getConfig().getDouble("racas." + r + ".escala", 1.0), "§7Clique para escolher esta raça"));
         item.setItemMeta(meta); return item;
     }
     private void menu(Player p) {
@@ -84,8 +87,34 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
         dados.set(path(p,"transformacao"),tipo); salvar(); aplicar(p);
         p.sendMessage("§dVocê adquiriu a condição sobrenatural: §f" + getConfig().getString("transformacoes." + tipo + ".nome", tipo) + "§d!");
     }
-    @EventHandler public void entrar(PlayerJoinEvent e) {
-        Bukkit.getScheduler().runTaskLater(this, () -> { if(e.getPlayer().isOnline()) aplicar(e.getPlayer()); }, 2L);
+    private void prepararEntrada(Player p) {
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (!p.isOnline()) return;
+            aplicar(p);
+            if (raca(p).isEmpty() && getConfig().getBoolean("selecao.abrir_ao_entrar", true)) {
+                p.sendMessage("§eEscolha sua raça. Você também pode abrir a seleção com /raca.");
+                menu(p);
+            }
+        }, Math.max(1L, getConfig().getLong("selecao.atraso_ticks", 40L)));
+    }
+    @EventHandler public void entrar(PlayerJoinEvent e) { prepararEntrada(e.getPlayer()); }
+    @EventHandler public void sair(PlayerQuitEvent e) {
+        if (testes.remove(e.getPlayer().getUniqueId()) != null) aplicar(e.getPlayer());
+    }
+    @EventHandler public void mudarMundo(PlayerChangedWorldEvent e) {
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (e.getPlayer().isOnline()) aplicar(e.getPlayer());
+        }, 2L);
+    }
+    private void diagnostico(CommandSender sender, Player p) {
+        var a = p.getAttribute(Attribute.SCALE);
+        sender.sendMessage("§6EtherRaceSystem " + getDescription().getVersion() + " | " + p.getName());
+        sender.sendMessage("§7Raça salva: §f" + (raca(p).isEmpty() ? "Nenhuma" : nomeRaca(raca(p)))
+            + " §7| Teste: §f" + testes.getOrDefault(p.getUniqueId(), "Nenhum"));
+        sender.sendMessage("§7Transformação: §f" + (transformacao(p).isEmpty() ? "Nenhuma" : transformacao(p)));
+        sender.sendMessage(a == null ? "§cAtributo SCALE indisponível." :
+            "§7Escala base: §f" + a.getBaseValue() + " §7| Efetiva: §f" + a.getValue()
+            + " §7| Modificadores: §f" + a.getModifiers().size());
     }
     @EventHandler public void renascer(PlayerRespawnEvent e) {
         Bukkit.getScheduler().runTaskLater(this, () -> aplicar(e.getPlayer()), 2L);
@@ -117,6 +146,35 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
             sender.sendMessage("§6"+p.getName()+" §7| Raça: §f"+(raca(p).isEmpty()?"Nenhuma":nomeRaca(raca(p)))+" §7| Transformação: §f"+(transformacao(p).isEmpty()?"Nenhuma":transformacao(p))); return true;
         }
         if (!sender.hasPermission("etherracesystem.admin")) { sender.sendMessage("§cSem permissão."); return true; }
+        if (sub.equals("debug")) {
+            if (args.length < 2) {
+                sender.sendMessage("§e/raca debug <info|testar|restaurar|menu> [raça] [jogador]");
+                return true;
+            }
+            String acao = args[1].toLowerCase(Locale.ROOT);
+            boolean testar = acao.equals("testar");
+            int indice = testar ? 3 : 2;
+            Player p = args.length > indice ? Bukkit.getPlayerExact(args[indice])
+                : (sender instanceof Player pl ? pl : null);
+            if (p == null) { sender.sendMessage("§cInforme um jogador online."); return true; }
+            switch (acao) {
+                case "info" -> diagnostico(sender, p);
+                case "testar" -> {
+                    if (args.length < 3 || !valido(args[2].toLowerCase(Locale.ROOT), RACAS)) {
+                        sender.sendMessage("§eRaças: " + String.join(", ", RACAS)); return true;
+                    }
+                    testes.put(p.getUniqueId(), args[2].toLowerCase(Locale.ROOT));
+                    aplicar(p);
+                    p.sendMessage("§eTeste temporário de tamanho: " + nomeRaca(args[2].toLowerCase(Locale.ROOT))
+                        + ". Use /raca debug restaurar para encerrar.");
+                    diagnostico(sender, p);
+                }
+                case "restaurar" -> { testes.remove(p.getUniqueId()); aplicar(p); diagnostico(sender, p); }
+                case "menu" -> menu(p);
+                default -> sender.sendMessage("§eUse info, testar, restaurar ou menu.");
+            }
+            return true;
+        }
         if (sub.equals("reload")) { reloadConfig(); for(Player p:Bukkit.getOnlinePlayers()) aplicar(p); sender.sendMessage("§aConfiguração recarregada."); return true; }
         if (args.length < 2) { sender.sendMessage("§e/raca set <jogador> <raca> | limpar <jogador> | item <jogador> <lobisomem|vampiro> | transformar <jogador> <tipo>"); return true; }
         Player alvo = Bukkit.getPlayerExact(args[1]); if(alvo == null) { sender.sendMessage("§cJogador não encontrado ou offline."); return true; }
@@ -133,7 +191,12 @@ public final class EtherRaceSystem extends JavaPlugin implements Listener, Comma
         sender.sendMessage("§cComando ou identificador inválido."); return true;
     }
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if(args.length==1) return Arrays.asList("info","set","limpar","item","transformar","reload");
+        if(args.length==1) return (sender.hasPermission("etherracesystem.admin") ? Arrays.asList("info","set","limpar","item","transformar","reload","debug") : List.of("info"));
+        if (args[0].equalsIgnoreCase("debug") && sender.hasPermission("etherracesystem.admin")) {
+            if (args.length == 2) return List.of("info", "testar", "restaurar", "menu");
+            if (args.length == 3 && args[1].equalsIgnoreCase("testar")) return Arrays.asList(RACAS);
+            if (args.length == (args[1].equalsIgnoreCase("testar") ? 4 : 3)) return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+        }
         if(args.length==3 && args[0].equalsIgnoreCase("set")) return Arrays.asList(RACAS);
         if(args.length==3 && (args[0].equalsIgnoreCase("item") || args[0].equalsIgnoreCase("transformar"))) return Arrays.asList(TRANSFORMACOES);
         return Collections.emptyList();
