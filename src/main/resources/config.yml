@@ -1,3 +1,6 @@
+selecao:
+  abrir_ao_entrar: true
+  atraso_ticks: 40
 racas:
   humano: {nome: "Humano", escala: 1.0, material: PLAYER_HEAD}
   elfo: {nome: "Elfo", escala: 1.09375, material: OAK_SAPLING}
